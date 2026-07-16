@@ -22,7 +22,7 @@
 </template>
 
 <script setup>
-import axios from 'axios'
+import http from '../api/http'
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
 const words = ref([])
@@ -64,7 +64,7 @@ const getAllWords = async (retryCount = 0) => {
 
   isLoading.value = true
   try {
-    const response = await axios.get('http://127.0.0.1:8000/words/list', {
+    const response = await http.get('/words/list', {
       params: { page: 1, page_size: 10000 }
     })
     words.value = response.data.data || []

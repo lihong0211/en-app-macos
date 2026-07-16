@@ -1,16 +1,13 @@
 <template>
-  <Desk />
+  <Login v-if="isLoginView" />
+  <Desk v-else />
 </template>
 
-<script>
+<script setup>
 import Desk from './components/Desk.vue'
+import Login from './components/Login.vue'
 
-export default {
-  name: 'App',
-  components: {
-    Desk
-  }
-}
+const isLoginView = new URLSearchParams(window.location.search).get('view') === 'login'
 </script>
 
 <style>
