@@ -3,7 +3,8 @@ from fastapi import APIRouter, Query, Depends, status
 from typing import Optional, List
 from sqlalchemy.orm import Session
 
-from model.users import UserModel, UserBase
+from model.users import UserModel, UserBase, UserPublic
+from utils.security import hash_password
 from db import get_db
 from core.api_result import success, error, ApiResponse
 
@@ -12,7 +13,7 @@ router = APIRouter(
 )
 
 
-@router.get("/list", response_model=ApiResponse[List[UserBase]], summary="获取用户列表")
+@router.get("/list", response_model=ApiResponse[List[UserPublic]], summary="获取用户列表")
 async def get_users(
     db: Session = Depends(get_db),
     page: int = Query(0, description="页码，从1开始"),
@@ -34,7 +35,7 @@ async def get_users(
 
 
 @router.get(
-    "/{user_id}", response_model=ApiResponse[UserBase], summary="根据ID获取用户"
+    "/{user_id}", response_model=ApiResponse[UserPublic], summary="根据ID获取用户"
 )
 async def get_user(user_id: int, db: Session = Depends(get_db)):
     user = UserModel.get_by_id(db, user_id)
@@ -45,7 +46,7 @@ async def get_user(user_id: int, db: Session = Depends(get_db)):
 
 @router.post(
     "/add",
-    response_model=ApiResponse[UserBase],
+    response_model=ApiResponse[UserPublic],
     status_code=status.HTTP_201_CREATED,
     summary="创建用户",
 )
@@ -55,12 +56,14 @@ async def create_user(user: UserBase, db: Session = Depends(get_db)):
         return error("Username already exists")
 
     user_data = user.dict()
+    if user_data.get("password"):
+        user_data["password"] = hash_password(user_data["password"])
     user_id = UserModel.insert(db, user_data)
 
     return success(UserModel.get_by_id(db, user_id))
 
 
-@router.post("/update", response_model=ApiResponse[UserBase], summary="更新用户")
+@router.post("/update", response_model=ApiResponse[UserPublic], summary="更新用户")
 async def update_user(
     user_id: int = Query(..., description="用户ID"),
     user_data: UserBase = None,
@@ -71,6 +74,8 @@ async def update_user(
         return error("User not found")
 
     update_dict = user_data.dict(exclude_unset=True)
+    if update_dict.get("password"):
+        update_dict["password"] = hash_password(update_dict["password"])
 
     if "username" in update_dict and update_dict["username"] != existing_user.username:
         username_exists = UserModel.select_one_by(
@@ -93,7 +98,7 @@ async def delete_user(
     return success()
 
 
-@router.post("/activate", response_model=ApiResponse[UserBase], summary="激活/禁用用户")
+@router.post("/activate", response_model=ApiResponse[UserPublic], summary="激活/禁用用户")
 async def activate_user(
     user_id: int = Query(..., description="用户ID"),
     active: bool = Query(..., description="激活状态"),
