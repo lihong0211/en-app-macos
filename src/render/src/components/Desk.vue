@@ -1,316 +1,284 @@
 <template>
-  <div class="app">
-    <div class="swiper-container" @mouseenter="pauseAutoplay" @mouseleave="resumeAutoplay">
-      <swiper :modules="modules" :direction="'vertical'" :slides-per-view="3" :space-between="10" :centeredSlides="true"
-        :autoplay="autoplayConfig" @swiper="onSwiper" @slideChange="onSlideChange" @reachEnd="onReachEnd"
-        class="custom-swiper vertical-swiper">
-        <swiper-slide v-for="(word, index) in words" :key="word.id || index">
-          <div class="word-card" :class="{ 'active': currentIndex === index, 'inactive': currentIndex !== index }">
-            <div class="word-text">{{ word.word }}</div>
-            <div v-for="meaning in word.meaning" class="word-meaning">
-              <span class="word-type">{{ meaning.type }}</span>
-              : {{ meaning.content }}
-            </div>
-          </div>
-        </swiper-slide>
-        <!-- 加载更多指示器 -->
-        <swiper-slide v-if="hasMore && isLoading">
-          <div class="load-more-indicator">
-            <div class="loading-spinner"></div>
-            <p>加载更多单词中...</p>
-          </div>
-        </swiper-slide>
-      </swiper>
+  <div class="app" :class="{ hover: isHovering }" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave"
+    @mousedown="startDrag">
+    <div class="overlay"></div>
+
+    <div class="controls">
+      <button class="ctrl-btn" title="最小化" @click="minimize"><span
+          class="ctrl-btn-icon ctrl-btn-icon--minimize"></span></button>
+      <button class="ctrl-btn" title="关闭" @click="closeWindow"><span
+          class="ctrl-btn-icon ctrl-btn-icon--close"></span></button>
     </div>
 
-    <!-- 分页信息显示 -->
-    <div class="pagination-info">
-      <span>第 {{ currentPage }} 页</span>
-      <span>已加载 {{ words.length }} 个单词</span>
-      <span v-if="!hasMore">已加载全部数据</span>
-    </div>
+    <transition name="fade" mode="out-in">
+      <div v-if="currentWord" class="word-block" :key="currentWord.id || currentIndex">
+        <div class="word-text">{{ currentWord.word }}</div>
+        <div v-for="(m, i) in currentWord.meaning.slice(0, 2)" :key="i" class="word-meaning">
+          <span>{{ m.type }}</span>{{ m.content }}
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
 <script setup>
 import axios from 'axios'
-import { ref, computed, onMounted } from 'vue'
-import { Swiper, SwiperSlide } from 'swiper/vue'
-import { Autoplay } from 'swiper/modules'
-import 'swiper/css'
-import 'swiper/css/pagination'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
 const words = ref([])
-const swiperInstance = ref(null)
 const currentIndex = ref(0)
-const isAutoPlay = ref(true)
-const isHovering = ref(false)
-const currentPage = ref(0)
-const hasMore = ref(true)
 const isLoading = ref(false)
-const isReachEndTriggered = ref(false)
+const isHovering = ref(false)
+let autoplayTimer = null
+let hoverLeaveTimer = null
 
-const modules = [Autoplay]
+const startAutoplay = () => {
+  clearInterval(autoplayTimer)
+  autoplayTimer = setInterval(next, 7000)
+}
 
-const autoplayConfig = computed(() => {
-  return isAutoPlay.value && !isHovering.value ? {
-    delay: 5000,
-    disableOnInteraction: false,
-    pauseOnMouseEnter: true
-  } : false
-})
+const stopAutoplay = () => {
+  clearInterval(autoplayTimer)
+}
 
-const getList = async (page) => {
-  if (isLoading.value || !hasMore.value) return
+const onMouseEnter = () => {
+  clearTimeout(hoverLeaveTimer)
+  isHovering.value = true
+  stopAutoplay()
+}
+
+const onMouseLeave = () => {
+  // 短暂延迟再隐藏，鼠标移向按钮途中稍微划出窗口边界不会立刻收起控制条
+  hoverLeaveTimer = setTimeout(() => {
+    isHovering.value = false
+    next() // 恢复轮播时立刻切一次，不用再等一整个间隔周期
+    startAutoplay()
+  }, 300)
+}
+
+const currentWord = computed(() => words.value[currentIndex.value] || null)
+
+// 一次性把所有单词拉回来，后面直接在全量里随机，不用分页
+const getAllWords = async (retryCount = 0) => {
+  if (isLoading.value) return
 
   isLoading.value = true
   try {
-    const response = await axios.get('/api/words/list', {
-      params: {
-        page,
-        page_size: 10  // 每页加载10个单词
-      }
+    const response = await axios.get('http://127.0.0.1:8000/words/list', {
+      params: { page: 1, page_size: 10000 }
     })
-
-    if (response.data.data && response.data.data.length > 0) {
-      if (page === 1) {
-        words.value = response.data.data
-      } else {
-        words.value = [...words.value, ...response.data.data]
-      }
-
-      // 检查是否还有更多数据
-      hasMore.value = response.data.data.length >= 10
-
-    } else {
-      hasMore.value = false
-    }
-    currentPage.value = page
-
+    words.value = response.data.data || []
   } catch (error) {
     console.error('获取单词失败:', error)
-    hasMore.value = false
+    // 生产环境下 python 后端启动比页面挂载慢，第一次请求大概率会失败，隔几秒重试
+    const maxRetries = 15
+    if (retryCount < maxRetries) {
+      setTimeout(() => getAllWords(retryCount + 1), 2000)
+    }
   } finally {
     isLoading.value = false
-    isReachEndTriggered.value = false
   }
 }
 
-const loadMore = () => {
-  // 防止重复触发
-  if (isReachEndTriggered.value || isLoading.value || !hasMore.value) return
+const next = () => {
+  if (words.value.length <= 1) return
 
-  isReachEndTriggered.value = true
-  getList(currentPage.value + 1)
+  let randomIndex
+  do {
+    randomIndex = Math.floor(Math.random() * words.value.length)
+  } while (randomIndex === currentIndex.value)
+  currentIndex.value = randomIndex
 }
 
-const onSwiper = (swiper) => {
-  swiperInstance.value = swiper
+const minimize = () => window.electronAPI?.minimizeWindow()
+const closeWindow = () => window.electronAPI?.closeWindow()
+
+// 自定义拖拽：不用 -webkit-app-region: drag，避免和 hover 事件冲突
+let dragStart = null
+
+const onDrag = (e) => {
+  if (!dragStart) return
+  const dx = e.screenX - dragStart.x
+  const dy = e.screenY - dragStart.y
+  dragStart = { x: e.screenX, y: e.screenY }
+  window.electronAPI?.moveWindowBy(dx, dy)
 }
 
-const onSlideChange = (swiper) => {
-  currentIndex.value = swiper.activeIndex
+const stopDrag = () => {
+  dragStart = null
+  window.removeEventListener('mousemove', onDrag)
+  window.removeEventListener('mouseup', stopDrag)
+}
 
-  // 只有当滑动到最后一个slide时才触发加载更多
-  if (currentIndex.value >= words.value.length - 1 && hasMore.value) {
-    loadMore()
+const startDrag = (e) => {
+  if (e.target.closest('.ctrl-btn')) return
+  e.preventDefault()
+  dragStart = { x: e.screenX, y: e.screenY }
+  window.addEventListener('mousemove', onDrag)
+  window.addEventListener('mouseup', stopDrag)
+}
+
+onMounted(async () => {
+  await getAllWords()
+  if (words.value.length > 0) {
+    currentIndex.value = Math.floor(Math.random() * words.value.length)
   }
-}
+  startAutoplay()
+})
 
-const onReachEnd = () => {
-  // 只有当还有更多数据且没有正在加载时才触发
-  if (hasMore.value) {
-    loadMore()
-  }
-}
-
-const pauseAutoplay = () => {
-  isHovering.value = true
-  if (swiperInstance.value && swiperInstance.value.autoplay) {
-    swiperInstance.value.autoplay.stop()
-  }
-}
-
-const resumeAutoplay = () => {
-  isHovering.value = false
-  if (swiperInstance.value && swiperInstance.value.autoplay) {
-    swiperInstance.value.autoplay.start()
-  }
-}
-
-onMounted(() => {
-  getList(1)
+onBeforeUnmount(() => {
+  clearInterval(autoplayTimer)
+  clearTimeout(hoverLeaveTimer)
+  stopDrag()
 })
 </script>
 
 <style scoped>
 .app {
+  position: relative;
   width: 100%;
-  min-height: 100vh;
-  background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
-  color: #fff;
+  height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  background: transparent;
+  overflow: hidden;
+  padding: 12px;
+  user-select: none;
+  cursor: default;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.app.hover .overlay {
+  opacity: 1;
+}
+
+.controls {
+  position: absolute;
+  top: 5px;
+  right: 30px;
+  display: flex;
+  gap: 5px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  -webkit-app-region: no-drag;
+  z-index: 2;
+}
+
+.app.hover .controls {
+  opacity: 1;
+}
+
+.ctrl-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 16px;
+  line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  position: relative;
-}
-
-.swiper-container {
-  width: 100%;
-  max-width: 500px;
-  height: 100vh;
-  margin: 0 auto;
   cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 
-.custom-swiper {
-  overflow: visible;
-  height: 100%;
+.ctrl-btn:hover {
+  color: rgb(236, 68, 68);
+  background: rgba(255, 255, 255, 0.12);
 }
 
-.vertical-swiper {
-  height: 100vh;
+.ctrl-btn-icon {
+  display: block;
+  position: relative;
+  width: 10px;
+  height: 10px;
 }
 
-.word-card {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
-  padding: 0 20px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  color: #fff;
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s ease;
-  min-height: 180px;
-  transform: scale(0.8);
-  opacity: 0.6;
+.ctrl-btn-icon--minimize {
+  height: 1.4px;
+  align-self: center;
+  background: currentColor;
 }
 
-.word-card.active {
-  transform: scale(1);
-  opacity: 1;
-  min-height: 220px;
-  background: rgba(255, 255, 255, 0.2);
-  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+.ctrl-btn-icon--close::before,
+.ctrl-btn-icon--close::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 1.4px;
+  background: currentColor;
 }
 
-.word-card.inactive {
-  transform: scale(0.8);
-  opacity: 0.6;
+.ctrl-btn-icon--close::before {
+  transform: translate(-50%, -50%) rotate(45deg);
 }
 
-.word-content {
-  text-align: center;
+.ctrl-btn-icon--close::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.word-block {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  max-height: 100%;
+  overflow: hidden;
+  text-align: left;
+  color: rgb(70, 185, 234);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9);
+  word-break: break-word;
 }
 
 .word-text {
-  margin-top: -20px;
-  font-size: 36px;
+  font-size: 26px;
   font-weight: 700;
-  margin-bottom: 15px;
-  color: #fff;
-  transition: all 0.3s ease;
-  text-align: left;
-}
-
-.word-card.active .word-text {
-  font-size: 42px;
-}
-
-.word-card.inactive .word-text {
-  font-size: 28px;
+  margin-bottom: 6px;
 }
 
 .word-meaning {
-  text-align: left;
+  color: rgb(70, 185, 234);
   font-size: 14px;
-  transition: all 0.3s ease;
-}
-
-.word-card.active .word-meaning {
-  font-size: 16px;
-}
-
-.word-card.inactive .word-meaning {
-  font-size: 12px;
-  opacity: 0.8;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  width: 370px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .word-type {
+  /* color: #cbd5ff; */
+  margin-right: 4px;
   font-weight: 600;
 }
 
-.load-more-indicator {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 180px;
-  color: rgba(255, 255, 255, 0.7);
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.6s ease;
 }
 
-.loading-spinner {
-  width: 30px;
-  height: 30px;
-  border: 3px solid rgba(255, 255, 255, 0.3);
-  border-radius: 50%;
-  border-top-color: #fff;
-  animation: spin 1s ease-in-out infinite;
-  margin-bottom: 10px;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.pagination-info {
-  position: absolute;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 20px;
-  font-size: 14px;
-  opacity: 0.8;
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .word-text {
-    font-size: 28px;
-  }
-
-  .word-card.active .word-text {
-    font-size: 32px;
-  }
-
-  .word-card.inactive .word-text {
-    font-size: 22px;
-  }
-
-  .swiper-container {
-    max-width: 90%;
-  }
-
-  .word-card {
-    height: 150px;
-  }
-
-  .word-card.active {
-    height: 180px;
-  }
-
-  .swiper-container:active {
-    cursor: grabbing;
-  }
-
-  .pagination-info {
-    flex-direction: column;
-    gap: 5px;
-    text-align: center;
-  }
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

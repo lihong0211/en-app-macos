@@ -48,9 +48,12 @@ def run_monitor():
     ]
 
     print(f"启动 mitmdump: {' '.join(cmd)}")
-    # 在前台运行，不捕获输出
-    process = subprocess.Popen(cmd)
-    return process
+    try:
+        # 在前台运行，不捕获输出
+        return subprocess.Popen(cmd)
+    except FileNotFoundError:
+        print("⚠️ 找不到 mitmdump，跳过流量监控（不影响其他功能）")
+        return None
 
 
 def response(flow: http.HTTPFlow):

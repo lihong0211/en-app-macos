@@ -10,7 +10,6 @@
   "dependencies": {
     "@vue/eslint-config-prettier": "^10.2.0",
     "core-js": "^3.8.3",
-    "swiper": "^11.2.10",
     "vue": "^3.2.13"
   },
   "devDependencies": {

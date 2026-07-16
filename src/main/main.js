@@ -1,7 +1,10 @@
 import { spawn, execFile } from 'child_process'
-import { join } from 'path'
-import { app, BrowserWindow, clipboard, screen, globalShortcut } from 'electron'
-import { devConfig } from '../../config/dev.js'
+import { readFileSync } from 'fs'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
+import { app, BrowserWindow, clipboard, screen, globalShortcut, ipcMain } from 'electron'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 let pythonProcess = null
 let mainWindow = null
@@ -13,22 +16,16 @@ let isCapturing = false
 function createWindow() {
   // 创建浏览器窗口的代码
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 400,
+    height: 100,
     webPreferences: {
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      preload: join(__dirname, '../preload/preload.cjs')
     },
-    // 关键配置：启用透明窗口
-    // transparent: true,
-    // 可选：无边框窗口以获得更好的视觉效果
-    frame: true,
-    // 可选：允许窗口背景透明
-    // backgroundColor: '#00000000'
+    transparent: true,
+    frame: false
   })
-  // 在主进程中使用
-  mainWindow.setVibrancy('green'); // macOS专属效果
-  mainWindow.setOpacity(1); // 设置整体不透明度
   // 悬浮于所有虚拟桌面和全屏应用之上
   mainWindow.setAlwaysOnTop(true, 'screen-saver')
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
@@ -42,7 +39,6 @@ function createWindow() {
   if (isDev) {
     // 开发环境 - 尝试连接Vue开发服务器，失败时显示提示
     loadDevServerWithRetry()
-    mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
@@ -161,12 +157,28 @@ function startVueDevServer() {
   }
 }
 
-function startPythonBackend() {
+// 解析 .env 文件为环境变量对象：打包后的 python-backend 可执行文件里，
+// python-dotenv 按源文件路径向上查找 .env 的逻辑找不到真实文件（路径指向 PyInstaller 的临时解压目录），
+// 所以改成由 Electron 主进程自己读取 .env 并显式注入子进程环境变量
+function parseEnvFile(content) {
+  const env = {}
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eq = trimmed.indexOf('=')
+    if (eq === -1) continue
+    env[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
+  }
+  return env
+}
+
+async function startPythonBackend() {
   const isDev = process.env.NODE_ENV === 'development'
   const cwd = process.cwd()
-  
+
   if (isDev) {
     // 开发环境
+    const { devConfig } = await import('../../config/dev.js')
     const { pythonPath, backendPath, workingDir } = devConfig
     const venvBin = join(cwd, 'backend', '.venv', 'bin')
     pythonProcess = spawn(pythonPath, [backendPath], {
@@ -178,16 +190,13 @@ function startPythonBackend() {
       }
     })
   } else {
-    // 生产环境
+    // 生产环境：直接跑 pyinstaller 打包出来的独立可执行文件，不依赖 venv/python 解释器
     const resourcesPath = process.resourcesPath
-    const pythonExecutable = join(resourcesPath, 'backend', '.venv', 'bin', 'python')
-    const backendScript = join(resourcesPath, 'backend', 'main.py')
-    
-    pythonProcess = spawn(pythonExecutable, [backendScript], {
-      env: {
-        ...process.env,
-        PATH: `${join(resourcesPath, 'backend', '.venv', 'bin')}:${process.env.PATH}`
-      }
+    const backendExecutable = join(resourcesPath, 'backend', 'python-backend')
+    const envFileContent = readFileSync(join(resourcesPath, 'backend', '.env'), 'utf-8')
+
+    pythonProcess = spawn(backendExecutable, [], {
+      env: { ...process.env, ...parseEnvFile(envFileContent) }
     })
   }
 
@@ -429,6 +438,20 @@ async function captureSelectionAndLookup() {
   }
 }
 
+// 渲染进程窗口控制按钮（最小化/关闭）
+ipcMain.on('window-minimize', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize()
+})
+ipcMain.on('window-close', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close()
+})
+// 自定义拖拽：不用 -webkit-app-region: drag（会吞掉 hover 事件），改成渲染进程算好鼠标位移量发过来
+ipcMain.on('window-move-by', (event, dx, dy) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const [x, y] = mainWindow.getPosition()
+  mainWindow.setPosition(x + dx, y + dy)
+})
+
 app.whenReady().then(() => {
   // 在开发环境下可选：尝试自动启动Vue开发服务器
   if (process.env.NODE_ENV === 'development') {
@@ -441,6 +464,7 @@ app.whenReady().then(() => {
     }, 3000);
   } else {
     // 生产环境直接启动
+    startPythonBackend();
     createWindow();
   }
 

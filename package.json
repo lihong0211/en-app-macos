@@ -1,19 +1,20 @@
 {
   "name": "your-app",
   "version": "1.0.0",
-  "description": "Your Electron + Python App",
+  "description": "记单词",
   "main": "src/main/main.js",
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development electron .",
-    "build": "npm run build:python:mac && npm run build:mac",
+    "build": "npm run build:python:mac && npm run build:render && npm run build:mac",
     "build:python:mac": "cd backend &&  pyinstaller python-backend.spec",
-    "build:mac": "electron-builder --mac --x64 --arm64",
+    "build:render": "cd src/render && npm run build",
+    "build:mac": "electron-builder --mac --arm64",
     "pack:mac": "electron-builder --mac --dir"
   },
   "build": {
     "appId": "com.yourcompany.yourapp",
-    "productName": "Your App",
+    "productName": "记单词",
     "directories": {
       "output": "dist"
     },
@@ -24,11 +25,12 @@
     ],
     "extraResources": [
       {
-        "from": "resources/python",
-        "to": "python",
-        "filter": [
-          "**/*"
-        ]
+        "from": "backend/dist/python-backend",
+        "to": "backend/python-backend"
+      },
+      {
+        "from": "backend/.env",
+        "to": "backend/.env"
       }
     ],
     "mac": {
@@ -36,7 +38,6 @@
       "target": {
         "target": "default",
         "arch": [
-          "x64",
           "arm64"
         ]
       },

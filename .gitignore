@@ -91,6 +91,12 @@ typings/
 # Electron-Forge
 out/
 
+# electron-builder output
+/dist/
+
+# vue-cli-service build output (generated from src/render)
+/src/renderer/
+
 # Python
 backend/.venv/
 backend/__pycache__/
