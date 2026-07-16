@@ -10,10 +10,6 @@ class CntFormatException(Exception):
     pass
 
 
-class LoginInfoException(Exception):
-    pass
-
-
 class BusinessException(Exception):
     code = 400
     msg = "服务器内部错误"
@@ -25,3 +21,8 @@ class BusinessException(Exception):
 
     def json(self):
         return api_result.error(msg=self.msg, code=self.code)
+
+
+class LoginInfoException(BusinessException):
+    def __init__(self, msg="未登录或登录已过期"):
+        super().__init__(code=401, msg=msg)
