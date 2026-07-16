@@ -7,5 +7,12 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('electronAPI', {
   minimizeWindow: () => ipcRenderer.send('window-minimize'),
   closeWindow: () => ipcRenderer.send('window-close'),
-  moveWindowBy: (dx, dy) => ipcRenderer.send('window-move-by', dx, dy)
+  moveWindowBy: (dx, dy) => ipcRenderer.send('window-move-by', dx, dy),
+
+  getToken: () => ipcRenderer.invoke('auth:get-token'),
+  setToken: (token) => ipcRenderer.invoke('auth:set-token', token),
+  clearToken: () => ipcRenderer.invoke('auth:clear-token'),
+  wechatLogin: () => ipcRenderer.invoke('auth:wechat-login'),
+  completeLogin: () => ipcRenderer.invoke('auth:login-success'),
+  sessionExpired: () => ipcRenderer.invoke('auth:session-expired')
 })
