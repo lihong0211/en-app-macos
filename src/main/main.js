@@ -1,10 +1,21 @@
 import { spawn, execFile } from 'child_process'
-import { readFileSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { app, BrowserWindow, clipboard, screen, globalShortcut, ipcMain } from 'electron'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+
+// 微信开放平台"网站应用"配置：AppID 不是密钥，可以放在客户端；
+// 打包前把 WECHAT_APP_ID 和 WECHAT_REDIRECT_URI 换成真实值
+// （WECHAT_REDIRECT_URI 要跟微信开放平台后台配置的"授权回调域"匹配的一个具体路径）
+const WECHAT_APP_ID = 'REPLACE_WITH_YOUR_WECHAT_APP_ID'
+const WECHAT_REDIRECT_URI = 'https://REPLACE_WITH_YOUR_DOMAIN/auth/wechat/callback'
+
+const API_BASE_URL =
+  process.env.NODE_ENV === 'development'
+    ? 'http://127.0.0.1:8000'
+    : 'https://REPLACE_WITH_YOUR_DOMAIN'
 
 let pythonProcess = null
 let mainWindow = null
@@ -12,6 +23,117 @@ let vueDevServer = null
 let popupWindow = null
 let popupCloseTimer = null
 let isCapturing = false
+let loginWindow = null
+
+function getAuthFilePath() {
+  return join(app.getPath('userData'), 'auth.json')
+}
+
+function getStoredToken() {
+  const filePath = getAuthFilePath()
+  if (!existsSync(filePath)) return null
+  try {
+    const data = JSON.parse(readFileSync(filePath, 'utf-8'))
+    return data.token || null
+  } catch {
+    return null
+  }
+}
+
+function setStoredToken(token) {
+  writeFileSync(getAuthFilePath(), JSON.stringify({ token }), 'utf-8')
+}
+
+function clearStoredToken() {
+  setStoredToken(null)
+}
+
+async function checkStoredAuth() {
+  const token = getStoredToken()
+  if (!token) return false
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    const data = await res.json()
+    return data.code === 200
+  } catch {
+    return false
+  }
+}
+
+function createLoginWindow() {
+  loginWindow = new BrowserWindow({
+    width: 420,
+    height: 600,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: join(__dirname, '../preload/preload.cjs')
+    }
+  })
+
+  loginWindow.on('closed', () => {
+    loginWindow = null
+  })
+
+  const isDev = process.env.NODE_ENV === 'development'
+  if (isDev) {
+    loginWindow.loadURL('http://localhost:8081?view=login')
+  } else {
+    loginWindow.loadFile(join(__dirname, '../renderer/index.html'), { query: { view: 'login' } })
+  }
+}
+
+// 微信扫码登录：弹一个子窗口加载微信官方授权页，用户扫码后微信会把这个
+// 窗口导航到 WECHAT_REDIRECT_URI，主进程拦截这个导航拿到 code，不等页面
+// 真正加载完就关窗口（用户体验上是扫完码窗口应声消失）
+function loginWithWechat() {
+  return new Promise((resolve, reject) => {
+    const state = Math.random().toString(36).slice(2)
+    const authUrl =
+      `https://open.weixin.qq.com/connect/qrconnect?appid=${WECHAT_APP_ID}` +
+      `&redirect_uri=${encodeURIComponent(WECHAT_REDIRECT_URI)}` +
+      `&response_type=code&scope=snsapi_login&state=${state}#wechat_redirect`
+
+    const wechatWindow = new BrowserWindow({
+      width: 400,
+      height: 550,
+      webPreferences: { contextIsolation: true }
+    })
+
+    let settled = false
+
+    const handleUrl = (url) => {
+      if (settled || !url.startsWith(WECHAT_REDIRECT_URI)) return
+      settled = true
+
+      const parsedUrl = new URL(url)
+      const code = parsedUrl.searchParams.get('code')
+      const returnedState = parsedUrl.searchParams.get('state')
+
+      if (!wechatWindow.isDestroyed()) wechatWindow.destroy()
+
+      if (code && returnedState === state) {
+        resolve(code)
+      } else {
+        reject(new Error('微信登录失败或已取消'))
+      }
+    }
+
+    wechatWindow.webContents.on('will-redirect', (event, url) => handleUrl(url))
+    wechatWindow.webContents.on('will-navigate', (event, url) => handleUrl(url))
+    wechatWindow.on('closed', () => {
+      if (!settled) {
+        settled = true
+        reject(new Error('用户取消了登录'))
+      }
+    })
+
+    wechatWindow.loadURL(authUrl)
+  })
+}
 
 function createWindow() {
   // 创建浏览器窗口的代码
@@ -452,20 +574,55 @@ ipcMain.on('window-move-by', (event, dx, dy) => {
   mainWindow.setPosition(x + dx, y + dy)
 })
 
-app.whenReady().then(() => {
-  // 在开发环境下可选：尝试自动启动Vue开发服务器
-  if (process.env.NODE_ENV === 'development') {
-    startVueDevServer();
-    startPythonBackend();
+ipcMain.handle('auth:get-token', () => getStoredToken())
+ipcMain.handle('auth:set-token', (event, token) => {
+  setStoredToken(token)
+  return true
+})
+ipcMain.handle('auth:clear-token', () => {
+  clearStoredToken()
+  return true
+})
+ipcMain.handle('auth:wechat-login', () => loginWithWechat())
+ipcMain.handle('auth:login-success', () => {
+  if (loginWindow && !loginWindow.isDestroyed()) {
+    loginWindow.close()
+  }
+  createWindow()
+})
+ipcMain.handle('auth:session-expired', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.close()
+  }
+  createLoginWindow()
+})
 
-    // 给Vue服务器一些启动时间，然后再创建窗口
-    setTimeout(() => {
-      createWindow();
-    }, 3000);
+app.whenReady().then(async () => {
+  const isDev = process.env.NODE_ENV === 'development'
+
+  // 开发环境继续本地起 Vue dev server + 本地 Python 后端；
+  // 生产环境后端已经常驻在云端，不用再在本机 spawn 一份
+  if (isDev) {
+    startVueDevServer()
+    startPythonBackend()
+  }
+
+  const openInitialWindow = () => {
+    if (isDev) {
+      // 给本地 Vue dev server 一点启动时间
+      setTimeout(() => createWindow(), 3000)
+    } else {
+      createWindow()
+    }
+  }
+
+  const authed = await checkStoredAuth()
+  if (authed) {
+    openInitialWindow()
+  } else if (isDev) {
+    setTimeout(() => createLoginWindow(), 3000)
   } else {
-    // 生产环境直接启动
-    startPythonBackend();
-    createWindow();
+    createLoginWindow()
   }
 
   app.on('activate', () => {
