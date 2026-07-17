@@ -21,7 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   playbackNext: () => ipcRenderer.send('playback:next'),
   playbackPrev: () => ipcRenderer.send('playback:prev'),
   setPlaying: (playing) => ipcRenderer.send('playback:set-playing', playing),
-  setShuffle: (shuffle) => ipcRenderer.send('playback:set-shuffle', shuffle),
+  setMode: (mode) => ipcRenderer.send('playback:set-mode', mode),
   setAudio: (enabled) => ipcRenderer.send('playback:set-audio', enabled),
   onPlayAudio: (callback) => {
     const listener = (event, word) => callback(word)

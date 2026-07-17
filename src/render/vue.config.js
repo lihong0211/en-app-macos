@@ -25,5 +25,12 @@ module.exports = defineConfig({
     }
   },
   transpileDependencies: true,
-  lintOnSave: false
+  lintOnSave: false,
+  // 页面标题（窗口/最小化缩略图显示用），默认会取 package.json 的 name "vue"
+  chainWebpack: (config) => {
+    config.plugin('html').tap((args) => {
+      args[0].title = '记单词'
+      return args
+    })
+  }
 })

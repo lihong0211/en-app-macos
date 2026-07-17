@@ -6,6 +6,9 @@ import { app, BrowserWindow, clipboard, screen, globalShortcut, ipcMain } from '
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+// 开发环境应用名默认是 "Electron"，统一显示为产品名
+app.name = '记单词'
+
 // 微信开放平台"网站应用"配置：AppID 不是密钥，可以放在客户端；
 // 打包前把 WECHAT_APP_ID 和 WECHAT_REDIRECT_URI 换成真实值
 // （WECHAT_REDIRECT_URI 要跟微信开放平台后台配置的"授权回调域"匹配的一个具体路径）
@@ -67,6 +70,7 @@ function createLoginWindow() {
   loginWindow = new BrowserWindow({
     width: 420,
     height: 600,
+    title: '记单词',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -144,6 +148,7 @@ function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1000,
     height: 680,
+    title: '记单词',
     minWidth: 860,
     minHeight: 560,
     titleBarStyle: 'hiddenInset',
@@ -172,6 +177,7 @@ function createBarWindow() {
   barWindow = new BrowserWindow({
     width: 400,
     height: 100,
+    title: '记单词',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -199,13 +205,21 @@ function createBarWindow() {
 }
 
 // ---------- 播放状态（主进程持有，主界面/悬浮条都是它的显示器） ----------
+// 大词库分页播放：一次只持有一页（100 词），播完当前页自动拉下一页，
+// 播完最后一页回到第一页；拉取失败继续循环当前页，不卡轮播。
 const playback = {
   libraryId: null, // 数字词库ID 或 'all'（全部单词）
   libraryName: '',
-  words: [],
+  words: [], // 当前页的单词
   index: -1,
+  page: 1,
+  pageSize: 100,
+  total: 0, // 词库总词数（不可分页的临时列表 = 列表长度）
+  pageable: false, // 播完当前页后是否自动翻页（筛选出的临时列表不翻）
+  playedInPage: 0,
+  loadingPage: false,
   playing: false,
-  shuffle: true,
+  mode: 'shuffle', // order=列表循环 single=单词循环（同一个词重复播） shuffle=随机
   audioEnabled: true, // 切词时播有道发音（美音）
   timer: null,
   barVisible: false
@@ -216,9 +230,14 @@ function playbackState() {
     libraryId: playback.libraryId,
     libraryName: playback.libraryName,
     index: playback.index,
-    total: playback.words.length,
+    page: playback.page,
+    pageSize: playback.pageSize,
+    total: playback.total,
+    // 全局序号（跨页），底部播放条显示 position/total
+    position:
+      playback.index >= 0 ? (playback.page - 1) * playback.pageSize + playback.index + 1 : 0,
     playing: playback.playing,
-    shuffle: playback.shuffle,
+    mode: playback.mode,
     audioEnabled: playback.audioEnabled,
     barVisible: playback.barVisible,
     currentWord: playback.words[playback.index] || null
@@ -244,10 +263,10 @@ function broadcastPlayback() {
   }
 }
 
-function playbackStep(step) {
+function stepWithinPage(step) {
   const n = playback.words.length
   if (!n) return
-  if (playback.shuffle && n > 1) {
+  if (playback.mode === 'shuffle' && n > 1) {
     let r
     do {
       r = Math.floor(Math.random() * n)
@@ -256,16 +275,76 @@ function playbackStep(step) {
   } else {
     playback.index = (playback.index + step + n) % n
   }
+  playback.playedInPage += 1
   broadcastPlayback()
   triggerAudio()
+}
+
+function playbackStep(step) {
+  const n = playback.words.length
+  if (!n) return
+  const multiPage = playback.pageable && Math.ceil(playback.total / playback.pageSize) > 1
+  // 顺序：播到页尾翻页；随机：本页播够 n 个后翻页
+  const pageExhausted = playback.mode === 'shuffle'
+    ? playback.playedInPage >= n
+    : playback.index >= n - 1
+  if (step > 0 && multiPage && pageExhausted) {
+    loadNextPage()
+    return
+  }
+  stepWithinPage(step)
+}
+
+// 拉下一页（最后一页播完回到第一页）；失败时退回本页内循环
+async function loadNextPage() {
+  if (playback.loadingPage) return
+  playback.loadingPage = true
+  try {
+    const totalPages = Math.max(1, Math.ceil(playback.total / playback.pageSize))
+    const nextPage = playback.page >= totalPages ? 1 : playback.page + 1
+    const base =
+      playback.libraryId === 'all'
+        ? `${API_BASE_URL}/words/list`
+        : `${API_BASE_URL}/libraries/${playback.libraryId}/words`
+    const token = getStoredToken()
+    const res = await fetch(`${base}?page=${nextPage}&page_size=${playback.pageSize}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+    const data = await res.json()
+    const list = data && data.code === 200 && data.data && data.data.list
+    if (!list || !list.length) {
+      throw new Error((data && data.msg) || '下一页为空')
+    }
+    playback.words = list
+    playback.page = nextPage
+    playback.total = data.data.total || playback.total
+    playback.index = playback.mode === 'shuffle' ? Math.floor(Math.random() * list.length) : 0
+    playback.playedInPage = 1
+    broadcastPlayback()
+    triggerAudio()
+  } catch (err) {
+    console.error('拉取下一页失败，继续循环当前页:', err.message)
+    stepWithinPage(1)
+  } finally {
+    playback.loadingPage = false
+  }
+}
+
+// 定时轮播一拍：单词循环模式重复读当前词，其余模式切下一个
+function playbackTick() {
+  if (playback.mode === 'single') {
+    if (playback.words[playback.index]) triggerAudio()
+    return
+  }
+  playbackStep(1)
 }
 
 // 手动切词也走这里重启定时器，保证切完有完整的一个间隔周期
 function restartPlaybackTimer() {
   clearInterval(playback.timer)
   playback.timer = null
-  if (playback.playing && playback.words.length > 1) {
-    playback.timer = setInterval(() => playbackStep(1), 7000)
+  if (playback.playing && playback.words.length > 0) {
+    playback.timer = setInterval(() => playbackTick(), 7000)
   }
 }
 
@@ -648,15 +727,21 @@ ipcMain.on('window-move-by', (event, dx, dy) => {
 
 // ---------- 播放控制 ----------
 ipcMain.handle('playback:start', (event, payload) => {
-  const { libraryId, libraryName, words, startIndex } = payload || {}
+  const { libraryId, libraryName, words, startIndex, page, pageSize, total, pageable } =
+    payload || {}
   playback.libraryId = libraryId ?? null
   playback.libraryName = libraryName || ''
   playback.words = Array.isArray(words) ? words : []
+  playback.page = page || 1
+  playback.pageSize = pageSize || 100
+  playback.total = total || playback.words.length
+  playback.pageable = !!pageable
   playback.index = Number.isInteger(startIndex)
     ? startIndex
     : playback.words.length
       ? Math.floor(Math.random() * playback.words.length)
       : -1
+  playback.playedInPage = playback.index >= 0 ? 1 : 0
   playback.playing = playback.words.length > 0
   restartPlaybackTimer()
   broadcastPlayback()
@@ -677,9 +762,11 @@ ipcMain.on('playback:set-playing', (event, playing) => {
   restartPlaybackTimer()
   broadcastPlayback()
 })
-ipcMain.on('playback:set-shuffle', (event, shuffle) => {
-  playback.shuffle = !!shuffle
-  broadcastPlayback()
+ipcMain.on('playback:set-mode', (event, mode) => {
+  if (['order', 'single', 'shuffle'].includes(mode)) {
+    playback.mode = mode
+    broadcastPlayback()
+  }
 })
 ipcMain.on('playback:set-audio', (event, enabled) => {
   playback.audioEnabled = !!enabled
@@ -688,7 +775,7 @@ ipcMain.on('playback:set-audio', (event, enabled) => {
 ipcMain.handle('playback:get-state', () => playbackState())
 
 // 划词弹窗收藏：主进程代发（弹窗是 data: 页面，直连后端会被 CORS 拦），
-// 带登录 token，收藏进默认词库"我的收藏"
+// 带登录 token，收藏进默认词库"默认收藏"
 ipcMain.handle('words:collect', async (event, wordData) => {
   try {
     const token = getStoredToken()
@@ -758,6 +845,16 @@ ipcMain.handle('auth:session-expired', () => {
 
 app.whenReady().then(async () => {
   const isDev = process.env.NODE_ENV === 'development'
+
+  // 开发环境 Dock 图标（打包版由 resources/icon.icns 提供）
+  const dockIconPath = join(__dirname, '../../resources/icon.png')
+  if (process.platform === 'darwin' && app.dock && existsSync(dockIconPath)) {
+    try {
+      app.dock.setIcon(dockIconPath)
+    } catch (err) {
+      console.error('设置 Dock 图标失败:', err.message)
+    }
+  }
 
   // 开发环境本地起 Vue dev server；后端统一用 service-ali（本地自行启动，端口 3000）
   if (isDev) {
