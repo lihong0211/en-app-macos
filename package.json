@@ -35,6 +35,7 @@
         ]
       },
       "icon": "resources/icon.icns",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
