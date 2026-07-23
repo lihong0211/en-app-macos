@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setPlaying: (playing) => ipcRenderer.send('playback:set-playing', playing),
   setMode: (mode) => ipcRenderer.send('playback:set-mode', mode),
   setAudio: (enabled) => ipcRenderer.send('playback:set-audio', enabled),
+  setSentenceAudio: (enabled) => ipcRenderer.send('playback:set-sentence', enabled),
+  setInterval: (ms) => ipcRenderer.send('playback:set-interval', ms),
+  setSubtitleColor: (color) => ipcRenderer.send('playback:set-subtitle-color', color),
+  notifyAudioEnded: () => ipcRenderer.send('playback:audio-ended'),
   onPlayAudio: (callback) => {
     const listener = (event, word) => callback(word)
     ipcRenderer.on('playback:play-audio', listener)
@@ -35,6 +39,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('playback:state', listener)
   },
   toggleBar: () => ipcRenderer.invoke('bar:toggle'),
+  resizeBar: (height) => ipcRenderer.send('bar:resize', height),
 
   // 划词弹窗收藏：由主进程发请求（data: 页面直连后端会被 CORS 拦）
   collectWord: (wordData) => ipcRenderer.invoke('words:collect', wordData),

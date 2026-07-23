@@ -2,6 +2,7 @@
   <div
     class="app"
     :class="{ hover: isHovering }"
+    :style="{ '--subtitle-color': playback?.subtitleColor || '#46b9ea' }"
     @mouseenter="onMouseEnter"
     @mouseleave="onMouseLeave"
     @mousedown="startDrag"
@@ -9,6 +10,17 @@
     <div class="overlay" />
 
     <div class="controls">
+      <label
+        class="ctrl-btn color-swatch"
+        title="字幕文字颜色"
+        :style="{ color: playback?.subtitleColor || '#46b9ea' }"
+      >
+        <input
+          type="color"
+          :value="playback?.subtitleColor || '#46b9ea'"
+          @input="onColorInput"
+        >
+      </label>
       <button
         class="ctrl-btn"
         title="最小化"
@@ -34,7 +46,21 @@
       mode="out-in"
     >
       <div
-        v-if="currentWord"
+        v-if="currentWord && isExpression"
+        ref="wordBlockRef"
+        :key="currentWord.id"
+        class="word-block"
+      >
+        <div class="word-text">
+          {{ currentWord.phrase }}
+        </div>
+        <div class="word-meaning">
+          {{ currentWord.meaning }}
+        </div>
+      </div>
+      <div
+        v-else-if="currentWord"
+        ref="wordBlockRef"
         :key="currentWord.id || currentWord.word"
         class="word-block"
       >
@@ -48,9 +74,21 @@
         >
           <span>{{ m.type }}</span>{{ m.content }}
         </div>
+        <div
+          v-if="currentSentence"
+          class="word-sentence"
+        >
+          <div class="sentence-en">
+            {{ currentSentence.en_text }}
+          </div>
+          <div class="sentence-zh">
+            {{ currentSentence.zh_text }}
+          </div>
+        </div>
       </div>
       <div
         v-else
+        ref="wordBlockRef"
         class="word-block"
       >
         <div class="word-meaning">
@@ -62,8 +100,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { playWordAudio, playSentenceAudio, firstSentenceAudioUrl } from '../utils/audio'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { playWordAudio, playSentenceAudio, allSentences, playSentenceQueue } from '../utils/audio'
 
 // 悬浮词幕条是主进程播放状态的纯展示层：不自己拉数据、不自己跑定时器
 const playback = ref(null)
@@ -73,6 +111,18 @@ let hoverLeaveTimer = null
 const isHovering = ref(false)
 
 const currentWord = computed(() => playback.value?.currentWord || null)
+const isExpression = computed(() => playback.value?.kind === 'expression')
+
+// 当前正在播放的例句（多义词按顺序逐条播，播完清空）
+const currentSentence = ref(null)
+
+// 内容变化（比如接播例句）时窗口高度跟着变，宽度不变
+const wordBlockRef = ref(null)
+let resizeObserver = null
+watch(wordBlockRef, (el, oldEl) => {
+  if (oldEl && resizeObserver) resizeObserver.unobserve(oldEl)
+  if (el && resizeObserver) resizeObserver.observe(el)
+})
 
 const onMouseEnter = () => {
   clearTimeout(hoverLeaveTimer)
@@ -91,6 +141,7 @@ const onMouseLeave = () => {
 
 const minimize = () => window.electronAPI?.minimizeWindow()
 const closeWindow = () => window.electronAPI?.closeWindow()
+const onColorInput = (e) => window.electronAPI?.setSubtitleColor(e.target.value)
 
 // 自定义拖拽：不用 -webkit-app-region: drag，避免和 hover 事件冲突
 let dragStart = null
@@ -118,16 +169,47 @@ const startDrag = (e) => {
 }
 
 onMounted(async () => {
+  resizeObserver = new ResizeObserver((entries) => {
+    const h = entries[0]?.contentRect?.height
+    if (h) window.electronAPI?.resizeBar(Math.ceil(h) + 24)
+  })
+  if (wordBlockRef.value) resizeObserver.observe(wordBlockRef.value)
+
   playback.value = await window.electronAPI?.getPlaybackState()
   unsubscribe = window.electronAPI?.onPlaybackState((state) => {
     playback.value = state
   })
   // 主界面关闭时，主进程会把发音事件定向发给词幕条
-  unsubscribeAudio = window.electronAPI?.onPlayAudio((word) => {
-    playWordAudio(word, () => {
-      const url = firstSentenceAudioUrl(currentWord.value)
-      if (url) playSentenceAudio(url)
-    })
+  unsubscribeAudio = window.electronAPI?.onPlayAudio((payload) => {
+    currentSentence.value = null
+    if (payload?.kind === 'expression') {
+      playSentenceAudio(payload.audioUrl, () => window.electronAPI?.notifyAudioEnded())
+      return
+    }
+    const afterWord = () => {
+      if (!playback.value?.sentenceEnabled) {
+        window.electronAPI?.notifyAudioEnded()
+        return
+      }
+      const sentences = allSentences(currentWord.value)
+      if (!sentences.length) {
+        window.electronAPI?.notifyAudioEnded()
+        return
+      }
+      playSentenceQueue(
+        sentences,
+        (s) => (currentSentence.value = s),
+        () => {
+          currentSentence.value = null
+          window.electronAPI?.notifyAudioEnded()
+        }
+      )
+    }
+    if (payload?.skipWordAudio) {
+      afterWord()
+    } else {
+      playWordAudio(payload?.text, afterWord)
+    }
   })
 })
 
@@ -135,6 +217,7 @@ onBeforeUnmount(() => {
   clearTimeout(hoverLeaveTimer)
   if (unsubscribe) unsubscribe()
   if (unsubscribeAudio) unsubscribeAudio()
+  resizeObserver?.disconnect()
   stopDrag()
 })
 </script>
@@ -206,6 +289,36 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.color-swatch {
+  position: relative;
+  overflow: hidden;
+}
+
+.color-swatch:hover {
+  color: inherit;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.color-swatch::after {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
+.color-swatch input[type='color'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
 .ctrl-btn-icon {
   display: block;
   position: relative;
@@ -244,11 +357,9 @@ onBeforeUnmount(() => {
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  max-height: 100%;
-  overflow: hidden;
   text-align: left;
-  color: rgb(70, 185, 234);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9);
+  color: var(--subtitle-color, #46b9ea);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
   word-break: break-word;
 }
 
@@ -259,7 +370,7 @@ onBeforeUnmount(() => {
 }
 
 .word-meaning {
-  color: rgb(70, 185, 234);
+  color: var(--subtitle-color, #46b9ea);
   font-size: 14px;
   line-height: 1.5;
   display: -webkit-box;
@@ -270,6 +381,19 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.word-sentence {
+  margin-top: 6px;
+  color: var(--subtitle-color, #46b9ea);
+  font-size: 13px;
+  line-height: 1.5;
+  width: 370px;
+}
+
+.sentence-zh {
+  margin-top: 2px;
+  opacity: 0.75;
 }
 
 .word-type {

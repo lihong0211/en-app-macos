@@ -3,16 +3,9 @@
     <!-- 左侧：词库（歌单）栏 -->
     <aside class="sidebar">
       <div class="drag-strip" />
-      <div
-        v-if="user"
-        class="user"
-      >
+      <div v-if="user" class="user">
         <div class="avatar">
-          <img
-            v-if="user.avatar"
-            :src="user.avatar"
-            alt=""
-          >
+          <img v-if="user.avatar" :src="user.avatar" alt="">
           <span v-else>{{ (user.nickname || user.username || '?').slice(0, 1).toUpperCase() }}</span>
         </div>
         <div class="user-name">
@@ -21,87 +14,44 @@
       </div>
 
       <div class="nav-section">
-        <div
-          class="nav-item"
-          :class="{ active: activeLibraryId === 'discover' }"
-          @click="selectLibrary('discover')"
-        >
+        <div class="nav-item" :class="{ active: activeLibraryId === 'discover' }" @click="selectLibrary('discover')">
           <span class="nav-icon">✦</span>推荐
         </div>
-        <div
-          class="nav-item"
-          :class="{ active: activeLibraryId === 'all' }"
-          @click="selectLibrary('all')"
-        >
+        <div class="nav-item" :class="{ active: activeLibraryId === 'all' }" @click="selectLibrary('all')">
           <span class="nav-icon">♪</span>全部单词
+        </div>
+        <div class="nav-item" :class="{ active: activeLibraryId === 'expressions' }"
+          @click="selectLibrary('expressions')">
+          <span class="nav-icon">💬</span>日常用语
         </div>
       </div>
 
       <div class="section-label section-head">
         <span><span class="nav-icon">▤</span>自建词库</span>
         <span class="head-actions">
-          <button
-            class="mini-btn head-btn"
-            title="新建词库"
-            @click="startCreate"
-          >＋</button>
-          <button
-            class="mini-btn head-btn"
-            :title="ownCollapsed ? '展开' : '折叠'"
-            @click="ownCollapsed = !ownCollapsed"
-          >{{ ownCollapsed ? '›' : '⌄' }}</button>
+          <button class="mini-btn head-btn" title="新建词库" @click="startCreate">＋</button>
+          <button class="mini-btn head-btn" :title="ownCollapsed ? '展开' : '折叠'" @click="ownCollapsed = !ownCollapsed">{{
+            ownCollapsed ? '›' : '⌄' }}</button>
         </span>
       </div>
       <div class="library-list">
         <template v-if="!ownCollapsed">
-          <div
-            v-if="creatingLibrary"
-            class="nav-item new-library"
-          >
-            <input
-              v-model="newLibraryName"
-              v-focus
-              class="inline-input"
-              placeholder="词库名称"
-              @keyup.enter="confirmCreate"
-              @keyup.esc="creatingLibrary = false"
-              @blur="confirmCreate"
-            >
+          <div v-if="creatingLibrary" class="nav-item new-library">
+            <input v-model="newLibraryName" v-focus class="inline-input" placeholder="词库名称" @keyup.enter="confirmCreate"
+              @keyup.esc="creatingLibrary = false" @blur="confirmCreate">
           </div>
-          <div
-            v-for="lib in sortedLibraries"
-            :key="lib.id"
-            class="nav-item library-item"
-            :class="{ active: activeLibraryId === lib.id }"
-            @click="selectLibrary(lib.id)"
-          >
+          <div v-for="lib in sortedLibraries" :key="lib.id" class="nav-item library-item"
+            :class="{ active: activeLibraryId === lib.id }" @click="selectLibrary(lib.id)">
             <template v-if="renamingId === lib.id">
-              <input
-                v-model="renameText"
-                v-focus
-                class="inline-input"
-                @keyup.enter="confirmRename(lib)"
-                @keyup.esc="renamingId = null"
-                @blur="confirmRename(lib)"
-              >
+              <input v-model="renameText" v-focus class="inline-input" @keyup.enter="confirmRename(lib)"
+                @keyup.esc="renamingId = null" @blur="confirmRename(lib)">
             </template>
             <template v-else>
               <span class="lib-name">{{ lib.name }}</span>
               <span class="lib-count">{{ lib.word_count }}</span>
-              <span
-                v-if="!PROTECTED_LIBS.includes(lib.name)"
-                class="lib-actions"
-              >
-                <button
-                  class="mini-btn"
-                  title="重命名"
-                  @click.stop="startRename(lib)"
-                >✎</button>
-                <button
-                  class="mini-btn"
-                  title="删除"
-                  @click.stop="removeLibrary(lib)"
-                >✕</button>
+              <span v-if="!PROTECTED_LIBS.includes(lib.name)" class="lib-actions">
+                <button class="mini-btn" title="重命名" @click.stop="startRename(lib)">✎</button>
+                <button class="mini-btn" title="删除" @click.stop="removeLibrary(lib)">✕</button>
               </span>
             </template>
           </div>
@@ -111,29 +61,17 @@
           <div class="section-label section-head public-label">
             <span><span class="nav-icon">☆</span>收藏词库</span>
             <span class="head-actions">
-              <button
-                class="mini-btn head-btn"
-                :title="favCollapsed ? '展开' : '折叠'"
-                @click="favCollapsed = !favCollapsed"
-              >{{ favCollapsed ? '›' : '⌄' }}</button>
+              <button class="mini-btn head-btn" :title="favCollapsed ? '展开' : '折叠'"
+                @click="favCollapsed = !favCollapsed">{{ favCollapsed ? '›' : '⌄' }}</button>
             </span>
           </div>
           <template v-if="!favCollapsed">
-            <div
-              v-for="lib in favorites"
-              :key="'fav-' + lib.id"
-              class="nav-item library-item"
-              :class="{ active: activeLibraryId === lib.id }"
-              @click="selectLibrary(lib.id)"
-            >
+            <div v-for="lib in favorites" :key="'fav-' + lib.id" class="nav-item library-item"
+              :class="{ active: activeLibraryId === lib.id }" @click="selectLibrary(lib.id)">
               <span class="lib-name">{{ lib.name }}</span>
               <span class="lib-count">{{ lib.word_count }}</span>
               <span class="lib-actions">
-                <button
-                  class="mini-btn"
-                  title="取消收藏"
-                  @click.stop="toggleFavorite(lib)"
-                >✕</button>
+                <button class="mini-btn" title="取消收藏" @click.stop="toggleFavorite(lib)">✕</button>
               </span>
             </div>
           </template>
@@ -154,39 +92,20 @@
           </div>
         </header>
         <div class="table-wrap discover">
-          <template
-            v-for="group in groupedPublic"
-            :key="group.name"
-          >
+          <template v-for="group in groupedPublic" :key="group.name">
             <h2 class="group-title">
               {{ group.name }}
             </h2>
             <div class="card-grid">
-              <div
-                v-for="lib in group.libs"
-                :key="lib.id"
-                class="lib-card"
-                @click="selectLibrary(lib.id)"
-              >
-                <div
-                  class="card-cover"
-                  :style="cardGradient(lib.name)"
-                >
+              <div v-for="lib in group.libs" :key="lib.id" class="lib-card" @click="selectLibrary(lib.id)">
+                <div class="card-cover" :style="cardGradient(lib.name)">
                   <span class="card-initial">{{ lib.name.slice(0, 2) }}</span>
                   <div class="card-hover">
-                    <button
-                      class="card-btn"
-                      title="播放"
-                      @click.stop="playLibrary(lib)"
-                    >
+                    <button class="card-btn" title="播放" @click.stop="playLibrary(lib)">
                       ▶
                     </button>
-                    <button
-                      class="card-btn"
-                      :class="{ faved: lib.favorited }"
-                      :title="lib.favorited ? '取消收藏' : '收藏'"
-                      @click.stop="toggleFavorite(lib)"
-                    >
+                    <button class="card-btn" :class="{ faved: lib.favorited }" :title="lib.favorited ? '取消收藏' : '收藏'"
+                      @click.stop="toggleFavorite(lib)">
                       {{ lib.favorited ? '★' : '☆' }}
                     </button>
                   </div>
@@ -203,6 +122,70 @@
         </div>
       </template>
 
+      <!-- 日常用语列表 -->
+      <template v-else-if="activeLibraryId === 'expressions'">
+        <header class="content-header">
+          <div class="header-titles">
+            <h1 class="view-title">
+              日常用语
+            </h1>
+            <span class="view-sub">{{ viewTotal }} 条</span>
+          </div>
+          <div class="header-actions">
+            <input v-model="filterText" class="filter-input" placeholder="筛选用语…">
+            <button class="play-all-btn" :disabled="!expressions.length" @click="playExpressionsFrom()">
+              ▶ 播放
+            </button>
+          </div>
+        </header>
+
+        <div class="table-wrap">
+          <table class="word-table">
+            <thead>
+              <tr>
+                <th class="col-idx">
+                  #
+                </th>
+                <th>短语</th>
+                <th>释义</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(ex, i) in expressions" :key="ex.id" :class="{ playing: isPlayingExpressionRow(ex) }"
+                @dblclick="playExpressionsFrom(i)">
+                <td class="col-idx">
+                  <span v-if="isPlayingExpressionRow(ex)" class="equalizer" :class="{ paused: !pb.playing }">
+                    <i /><i /><i />
+                  </span>
+                  <span v-else class="row-num">{{ (viewPage - 1) * PAGE_SIZE + i + 1 }}</span>
+                  <button class="row-play" title="从这里播放" @click="playExpressionsFrom(i)">
+                    ▶
+                  </button>
+                </td>
+                <td class="col-word">
+                  {{ ex.phrase }}
+                </td>
+                <td class="col-meaning">
+                  {{ ex.meaning }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="!loading && !expressions.length" class="empty">
+            {{ filterText ? '没有匹配的用语' : '暂无日常用语' }}
+          </div>
+          <div v-if="totalPages > 1" class="pagination">
+            <button class="page-btn" :disabled="viewPage <= 1" @click="fetchExpressions(viewPage - 1)">
+              ‹ 上一页
+            </button>
+            <span class="page-info">{{ viewPage }} / {{ totalPages }}</span>
+            <button class="page-btn" :disabled="viewPage >= totalPages" @click="fetchExpressions(viewPage + 1)">
+              下一页 ›
+            </button>
+          </div>
+        </div>
+      </template>
+
       <template v-else>
         <header class="content-header">
           <div class="header-titles">
@@ -212,33 +195,18 @@
             <span class="view-sub">{{ viewTotal }} 个单词</span>
           </div>
           <div class="header-actions">
-            <button
-              v-if="activePublicLib"
-              class="fav-toggle-btn"
-              :class="{ faved: activePublicLib.favorited }"
-              @click="toggleFavorite(activePublicLib)"
-            >
+            <button v-if="activePublicLib" class="fav-toggle-btn" :class="{ faved: activePublicLib.favorited }"
+              @click="toggleFavorite(activePublicLib)">
               {{ activePublicLib.favorited ? '★ 已收藏' : '☆ 收藏' }}
             </button>
-            <input
-              v-model="filterText"
-              class="filter-input"
-              placeholder="筛选单词…"
-            >
-            <button
-              class="play-all-btn"
-              :disabled="!words.length"
-              @click="playFrom()"
-            >
+            <input v-model="filterText" class="filter-input" placeholder="查找单词…">
+            <button class="play-all-btn" :disabled="!words.length" @click="playFrom()">
               ▶ 播放
             </button>
           </div>
         </header>
 
-        <div
-          class="table-wrap"
-          @click="openMenuWordId = null"
-        >
+        <div class="table-wrap" @click="openMenuWordId = null">
           <table class="word-table">
             <thead>
               <tr>
@@ -254,29 +222,13 @@
               </tr>
             </thead>
             <tbody>
-              <tr
-                v-for="(w, i) in words"
-                :key="w.id"
-                :class="{ playing: isPlayingRow(w) }"
-                @dblclick="playFrom(i)"
-              >
+              <tr v-for="(w, i) in words" :key="w.id" :class="{ playing: isPlayingRow(w) }" @dblclick="playFrom(i)">
                 <td class="col-idx">
-                  <span
-                    v-if="isPlayingRow(w)"
-                    class="equalizer"
-                    :class="{ paused: !pb.playing }"
-                  >
+                  <span v-if="isPlayingRow(w)" class="equalizer" :class="{ paused: !pb.playing }">
                     <i /><i /><i />
                   </span>
-                  <span
-                    v-else
-                    class="row-num"
-                  >{{ (viewPage - 1) * PAGE_SIZE + i + 1 }}</span>
-                  <button
-                    class="row-play"
-                    title="从这里播放"
-                    @click="playFrom(i)"
-                  >
+                  <span v-else class="row-num">{{ (viewPage - 1) * PAGE_SIZE + i + 1 }}</span>
+                  <button class="row-play" title="从这里播放" @click="playFrom(i)">
                     ▶
                   </button>
                 </td>
@@ -287,22 +239,11 @@
                   {{ w.us_pronunciation || w.en_pronunciation }}
                 </td>
                 <td class="col-meaning">
-                  <span
-                    v-for="(m, mi) in w.meaning"
-                    :key="mi"
-                    class="meaning-item"
-                  >
+                  <span v-for="(m, mi) in w.meaning" :key="mi" class="meaning-item">
                     <i class="pos">{{ m.type }}</i>{{ m.content }}
-                    <span
-                      v-if="m.sentence"
-                      class="sentence-item"
-                    >
-                      <button
-                        v-if="m.sentence.audio_url"
-                        class="sentence-play-btn"
-                        title="播放例句发音"
-                        @click.stop="playSentenceAudio(m.sentence.audio_url)"
-                      >
+                    <span v-if="m.sentence" class="sentence-item">
+                      <button v-if="m.sentence.audio_url" class="sentence-play-btn" title="播放例句发音"
+                        @click.stop="playSentenceAudio(m.sentence.audio_url)">
                         ▶
                       </button>
                       {{ m.sentence.en_text }}<span class="sentence-zh">{{ m.sentence.zh_text }}</span>
@@ -311,219 +252,115 @@
                 </td>
                 <td class="col-ops">
                   <!-- 未掌握标记：类似"我喜欢"，加入后随时在「未掌握」词库复习 -->
-                  <button
-                    class="op-btn heart-btn"
-                    :class="{ on: reviewWordIds.has(w.id) }"
-                    :title="reviewWordIds.has(w.id) ? '已掌握，移出复习' : '标记未掌握'"
-                    @click.stop="toggleReview(w)"
-                  >
-                    <img
-                      class="like-icon"
-                      :src="reviewWordIds.has(w.id) ? likeOnIcon : likeOffIcon"
-                      alt=""
-                    >
+                  <button class="op-btn heart-btn" :class="{ on: reviewWordIds.has(w.id) }"
+                    :title="reviewWordIds.has(w.id) ? '已掌握，移出复习' : '标记未掌握'" @click.stop="toggleReview(w)">
+                    <img class="like-icon" :src="reviewWordIds.has(w.id) ? likeOnIcon : likeOffIcon" alt="">
                   </button>
                   <!-- 自己的词库里是"移出"；全部单词和公共推荐词库里是"加入我的词库" -->
                   <template v-if="!isOwnLibraryView">
-                    <button
-                      class="op-btn"
-                      title="加入词库"
-                      @click.stop="openMenuWordId = openMenuWordId === w.id ? null : w.id"
-                    >
+                    <button class="op-btn" title="加入词库"
+                      @click.stop="openMenuWordId = openMenuWordId === w.id ? null : w.id">
                       ＋
                     </button>
-                    <div
-                      v-if="openMenuWordId === w.id"
-                      class="lib-menu"
-                      @click.stop
-                    >
-                      <div
-                        v-for="lib in libraries"
-                        :key="lib.id"
-                        class="lib-menu-item"
-                        @click="addToLibrary(w, lib)"
-                      >
+                    <div v-if="openMenuWordId === w.id" class="lib-menu" @click.stop>
+                      <div v-for="lib in libraries" :key="lib.id" class="lib-menu-item" @click="addToLibrary(w, lib)">
                         {{ lib.name }}
                       </div>
                     </div>
                   </template>
-                  <button
-                    v-else
-                    class="op-btn"
-                    title="移出词库"
-                    @click="removeFromLibrary(w)"
-                  >
+                  <button v-else class="op-btn" title="移出词库" @click="removeFromLibrary(w)">
                     ✕
                   </button>
                 </td>
               </tr>
             </tbody>
           </table>
-          <div
-            v-if="!loading && !words.length"
-            class="empty"
-          >
+          <div v-if="!loading && !words.length" class="empty">
             {{ filterText ? '没有匹配的单词' : activeLibraryId === 'all' ? '还没有单词，划词查询后收藏即可入库' : '词库还是空的，去「全部单词」里把单词加进来' }}
           </div>
-          <div
-            v-if="totalPages > 1"
-            class="pagination"
-          >
-            <button
-              class="page-btn"
-              :disabled="viewPage <= 1"
-              @click="fetchWords(viewPage - 1)"
-            >
+          <div v-if="totalPages > 1" class="pagination">
+            <button class="page-btn" :disabled="viewPage <= 1" @click="fetchWords(viewPage - 1)">
               ‹ 上一页
             </button>
             <span class="page-info">{{ viewPage }} / {{ totalPages }}</span>
-            <button
-              class="page-btn"
-              :disabled="viewPage >= totalPages"
-              @click="fetchWords(viewPage + 1)"
-            >
+            <button class="page-btn" :disabled="viewPage >= totalPages" @click="fetchWords(viewPage + 1)">
               下一页 ›
             </button>
           </div>
         </div>
       </template>
 
-      <!-- 底部：播放条（参考酷狗/QQ音乐：控制钮最左，功能按钮靠右） -->
-      <footer class="player-bar">
-        <div class="transport">
-          <button
-            class="t-btn"
-            title="上一个"
-            :disabled="!pb.total"
-            @click="electronAPI?.playbackPrev()"
-          >
-            ⏮
-          </button>
-          <button
-            class="t-btn t-play"
-            :title="pb.playing ? '暂停' : '播放'"
-            @click="togglePlay"
-          >
-            {{ pb.playing ? '⏸' : '▶' }}
-          </button>
-          <button
-            class="t-btn"
-            title="下一个"
-            :disabled="!pb.total"
-            @click="electronAPI?.playbackNext()"
-          >
-            ⏭
-          </button>
-        </div>
-
-        <div class="now-playing">
-          <transition
-            name="fade"
-            mode="out-in"
-          >
-            <div
-              v-if="pb.currentWord"
-              :key="pb.currentWord.id || pb.currentWord.word"
-              class="now-word"
-            >
-              <div class="now-title">
-                {{ pb.currentWord.word }}
-              </div>
-              <div class="now-sub">
-                {{ firstMeaning(pb.currentWord) }}
-              </div>
-            </div>
-            <div
-              v-else
-              class="now-word"
-            >
-              <div class="now-sub">
-                选一个词库，像放歌一样背单词
-              </div>
-            </div>
-          </transition>
-          <span
-            v-if="pb.total"
-            class="playing-from"
-          >{{ pb.libraryName }} · {{ pb.position }}/{{ pb.total }}</span>
-        </div>
-
-        <div class="bar-right">
-          <button
-            v-if="pb.currentWord"
-            class="t-btn heart-btn"
-            :class="{ on: reviewWordIds.has(pb.currentWord.id) }"
-            :title="reviewWordIds.has(pb.currentWord.id) ? '已掌握' : '标记未掌握'"
-            @click="toggleReview(pb.currentWord)"
-          >
-            <img
-              class="like-icon like-icon-lg"
-              :src="reviewWordIds.has(pb.currentWord.id) ? likeOnIcon : likeOffIcon"
-              alt=""
-            >
-          </button>
-          <button
-            class="mode-icon-btn"
-            :title="modeMeta.title"
-            @click="cycleMode"
-          >
-            <img
-              :src="modeMeta.icon"
-              :alt="modeMeta.title"
-            >
-          </button>
-          <button
-            class="mode-btn"
-            :class="{ on: pb.audioEnabled }"
-            title="切换单词时播放发音"
-            @click="electronAPI?.setAudio(!pb.audioEnabled)"
-          >
-            发音
-          </button>
-          <div
-            class="interval-control"
-            @mouseleave="showIntervalSlider = false"
-          >
-            <button
-              class="mode-btn"
-              title="轮播间隔"
-              @click="showIntervalSlider = !showIntervalSlider"
-            >
-              {{ (pb.intervalMs / 1000).toFixed(1) }}s
-            </button>
-            <div
-              v-if="showIntervalSlider"
-              class="interval-popover"
-            >
-              <span class="interval-value">{{ (pb.intervalMs / 1000).toFixed(1) }}s</span>
-              <input
-                type="range"
-                class="interval-slider"
-                min="3000"
-                max="7000"
-                step="500"
-                :value="pb.intervalMs"
-                @input="onIntervalInput"
-              >
-            </div>
-          </div>
-          <button
-            class="mode-btn"
-            :class="{ on: pb.barVisible }"
-            title="桌面词幕"
-            @click="electronAPI?.toggleBar()"
-          >
-            词幕
-          </button>
-        </div>
-      </footer>
     </section>
 
+    <!-- 底部：播放条，横跨侧栏+内容区整个宽度（参考酷狗/QQ音乐：控制钮最左，功能按钮靠右） -->
+    <footer class="player-bar">
+      <div class="transport">
+        <button class="t-btn" title="上一个" :disabled="!pb.total" @click="electronAPI?.playbackPrev()">
+          ⏮
+        </button>
+        <button class="t-btn t-play" :title="pb.playing ? '暂停' : '播放'" @click="togglePlay">
+          {{ pb.playing ? '⏸' : '▶' }}
+        </button>
+        <button class="t-btn" title="下一个" :disabled="!pb.total" @click="electronAPI?.playbackNext()">
+          ⏭
+        </button>
+      </div>
+
+      <div class="now-playing">
+        <span v-if="pb.total" class="playing-from">{{ pb.libraryName }} · {{ pb.position }}/{{ pb.total }}</span>
+        <transition name="fade" mode="out-in">
+          <div v-if="pb.currentWord" :key="pb.currentWord.id || pb.currentWord.word" class="now-word">
+            <div class="now-title">
+              {{ pb.kind === 'expression' ? pb.currentWord.phrase : pb.currentWord.word }}
+            </div>
+            <div class="now-sub">
+              {{ pb.kind === 'expression' ? pb.currentWord.meaning : firstMeaning(pb.currentWord) }}
+            </div>
+          </div>
+          <div v-else class="now-word">
+            <div class="now-sub">
+              选一个词库，像放歌一样背单词
+            </div>
+          </div>
+        </transition>
+      </div>
+
+      <div class="bar-right">
+        <button v-if="pb.currentWord && pb.kind !== 'expression'" class="t-btn heart-btn"
+          :class="{ on: reviewWordIds.has(pb.currentWord.id) }"
+          :title="reviewWordIds.has(pb.currentWord.id) ? '已掌握' : '标记未掌握'" @click="toggleReview(pb.currentWord)">
+          <img class="like-icon like-icon-lg" :src="reviewWordIds.has(pb.currentWord.id) ? likeOnIcon : likeOffIcon"
+            alt="">
+        </button>
+        <button class="mode-icon-btn" :title="modeMeta.title" @click="cycleMode">
+          <img :src="modeMeta.icon" :alt="modeMeta.title">
+        </button>
+        <button class="mode-btn" :class="{ on: pb.audioEnabled }" title="切换单词时播放发音"
+          @click="electronAPI?.setAudio(!pb.audioEnabled)">
+          发音
+        </button>
+        <button class="mode-btn" :class="{ on: pb.sentenceEnabled }" title="单词发音后接播例句（多义词逐条播）"
+          @click="electronAPI?.setSentenceAudio(!pb.sentenceEnabled)">
+          例句
+        </button>
+        <div class="interval-control" ref="intervalControlRef">
+          <button class="mode-btn" title="轮播间隔" @click="showIntervalSlider = !showIntervalSlider">
+            {{ (pb.intervalMs / 1000).toFixed(1) }}s
+          </button>
+          <div v-if="showIntervalSlider" class="interval-popover">
+            <span class="interval-value">{{ (pb.intervalMs / 1000).toFixed(1) }}s</span>
+            <input type="range" class="interval-slider" min="3000" max="15000" step="500" :value="pb.intervalMs"
+              @input="onIntervalInput">
+          </div>
+        </div>
+        <button class="mode-btn" :class="{ on: pb.barVisible }" title="桌面词幕" @click="electronAPI?.toggleBar()">
+          词幕
+        </button>
+      </div>
+    </footer>
+
     <transition name="fade">
-      <div
-        v-if="toast"
-        class="toast"
-      >
+      <div v-if="toast" class="toast">
         {{ toast }}
       </div>
     </transition>
@@ -533,7 +370,7 @@
 <script setup>
 import { ref, computed, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
 import http from '../api/http'
-import { playWordAudio, playSentenceAudio, firstSentenceAudioUrl } from '../utils/audio'
+import { playWordAudio, playSentenceAudio, allSentences, playSentenceQueue } from '../utils/audio'
 import modeOrderIcon from '../assets/mode-order.png'
 import modeSingleIcon from '../assets/mode-single.png'
 import modeShuffleIcon from '../assets/mode-shuffle.png'
@@ -547,6 +384,7 @@ const libraries = ref([])
 const publicLibraries = ref([])
 const favorites = ref([])
 const words = ref([])
+const expressions = ref([])
 const loading = ref(false)
 const activeLibraryId = ref('discover')
 const filterText = ref('')
@@ -576,6 +414,7 @@ let unsubscribeCollected = null
 
 // 主进程播放状态镜像
 const pb = reactive({
+  kind: 'word',
   libraryId: null,
   libraryName: '',
   index: -1,
@@ -584,16 +423,23 @@ const pb = reactive({
   playing: false,
   mode: 'shuffle',
   audioEnabled: true,
+  sentenceEnabled: true,
   intervalMs: 7000,
   barVisible: false,
   currentWord: null
 })
 
 const showIntervalSlider = ref(false)
+const intervalControlRef = ref(null)
 function onIntervalInput(e) {
   const ms = Number(e.target.value)
   pb.intervalMs = ms
   electronAPI?.setInterval(ms)
+}
+function onDocumentClick(e) {
+  if (showIntervalSlider.value && !intervalControlRef.value?.contains(e.target)) {
+    showIntervalSlider.value = false
+  }
 }
 
 // 播放模式：点击循环切换，只显示图标（列表循环 → 单词循环 → 随机）
@@ -669,7 +515,10 @@ function cardGradient(name) {
 let filterTimer = null
 watch(filterText, () => {
   clearTimeout(filterTimer)
-  filterTimer = setTimeout(() => fetchWords(1), 300)
+  filterTimer = setTimeout(
+    () => (activeLibraryId.value === 'expressions' ? fetchExpressions(1) : fetchWords(1)),
+    300
+  )
 })
 
 const totalPages = computed(() => Math.max(1, Math.ceil(viewTotal.value / PAGE_SIZE)))
@@ -775,7 +624,52 @@ function selectLibrary(id) {
   activeLibraryId.value = id
   filterText.value = ''
   openMenuWordId.value = null
-  fetchWords(1)
+  if (id === 'expressions') {
+    fetchExpressions(1)
+  } else {
+    fetchWords(1)
+  }
+}
+
+// ---------- 日常用语 ----------
+async function fetchExpressions(page = 1) {
+  loading.value = true
+  try {
+    const search = filterText.value.trim()
+    const res = await http.get('/daily-expressions/list', {
+      params: { page, page_size: PAGE_SIZE, ...(search ? { search } : {}) }
+    })
+    if (res.data.code === 200 && res.data.data) {
+      expressions.value = res.data.data.list || []
+      viewTotal.value = res.data.data.total || 0
+      viewPage.value = res.data.data.page || page
+    } else {
+      expressions.value = []
+      viewTotal.value = 0
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
+function isPlayingExpressionRow(ex) {
+  return pb.kind === 'expression' && pb.currentWord && pb.currentWord.id === ex.id
+}
+
+function playExpressionsFrom(index) {
+  const list = expressions.value
+  if (!list.length) return
+  electronAPI?.startPlayback({
+    kind: 'expression',
+    libraryId: 'expressions',
+    libraryName: '日常用语',
+    words: JSON.parse(JSON.stringify(list)),
+    startIndex: Number.isInteger(index) ? index : undefined,
+    page: viewPage.value,
+    pageSize: PAGE_SIZE,
+    total: filterText.value.trim() ? list.length : viewTotal.value,
+    pageable: !filterText.value.trim()
+  })
 }
 
 // ---------- 播放 ----------
@@ -784,6 +678,7 @@ function playFrom(index) {
   const list = words.value
   if (!list.length) return
   electronAPI?.startPlayback({
+    kind: 'word',
     libraryId: activeLibraryId.value,
     libraryName: activeLibraryName.value,
     words: JSON.parse(JSON.stringify(list)),
@@ -797,7 +692,11 @@ function playFrom(index) {
 
 function togglePlay() {
   if (!pb.total) {
-    playFrom()
+    if (activeLibraryId.value === 'expressions') {
+      playExpressionsFrom()
+    } else {
+      playFrom()
+    }
     return
   }
   electronAPI?.setPlaying(!pb.playing)
@@ -927,14 +826,32 @@ async function removeFromLibrary(word) {
 }
 
 onMounted(async () => {
+  document.addEventListener('click', onDocumentClick)
   const state = await electronAPI?.getPlaybackState()
   if (state) Object.assign(pb, state)
   unsubscribe = electronAPI?.onPlaybackState((state) => Object.assign(pb, state))
-  unsubscribeAudio = electronAPI?.onPlayAudio((word) => {
-    playWordAudio(word, () => {
-      const url = firstSentenceAudioUrl(pb.currentWord)
-      if (url) playSentenceAudio(url)
-    })
+  unsubscribeAudio = electronAPI?.onPlayAudio((payload) => {
+    if (payload?.kind === 'expression') {
+      playSentenceAudio(payload.audioUrl, () => electronAPI?.notifyAudioEnded())
+      return
+    }
+    const afterWord = () => {
+      if (!pb.sentenceEnabled) {
+        electronAPI?.notifyAudioEnded()
+        return
+      }
+      const sentences = allSentences(pb.currentWord)
+      if (!sentences.length) {
+        electronAPI?.notifyAudioEnded()
+        return
+      }
+      playSentenceQueue(sentences, null, () => electronAPI?.notifyAudioEnded())
+    }
+    if (payload?.skipWordAudio) {
+      afterWord()
+    } else {
+      playWordAudio(payload?.text, afterWord)
+    }
   })
   // 划词弹窗收藏成功 → 刷新列表和词库计数
   unsubscribeCollected = electronAPI?.onWordCollected((word) => {
@@ -956,6 +873,7 @@ onBeforeUnmount(() => {
   if (unsubscribeAudio) unsubscribeAudio()
   if (unsubscribeCollected) unsubscribeCollected()
   clearTimeout(toastTimer)
+  document.removeEventListener('click', onDocumentClick)
 })
 </script>
 
@@ -972,6 +890,7 @@ onBeforeUnmount(() => {
 
   display: grid;
   grid-template-columns: 210px 1fr;
+  grid-template-rows: 1fr auto;
   width: 100%;
   height: 100vh;
   background: var(--bg-deep);
@@ -1230,7 +1149,7 @@ onBeforeUnmount(() => {
 /* ---------- 内容区 ---------- */
 .content {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr;
   min-width: 0;
   min-height: 0;
 }
@@ -1324,7 +1243,7 @@ onBeforeUnmount(() => {
 .word-table td {
   padding: 9px 10px;
   border-bottom: 1px solid var(--line);
-  vertical-align: middle;
+  vertical-align: top;
 }
 
 .word-table tbody tr:hover {
@@ -1339,6 +1258,12 @@ onBeforeUnmount(() => {
   width: 44px;
   color: var(--dim);
   position: relative;
+}
+
+/* .word-table td 的优先级（类+元素）比纯类选择器高，单独 .col-idx 盖不掉它的 vertical-align: top，
+   这里用 td.col-idx 把优先级打平，源码顺序在后才能真正生效 */
+td.col-idx {
+  vertical-align: middle;
 }
 
 .row-num {
@@ -1380,6 +1305,13 @@ tr:hover .row-play {
   font-size: 12px;
 }
 
+/* 同上，纯类选择器优先级不够盖过 .word-table td 的 vertical-align: top */
+td.col-word,
+td.col-phonetic,
+td.col-ops {
+  vertical-align: middle;
+}
+
 .col-meaning {
   max-width: 0;
   overflow: hidden;
@@ -1395,7 +1327,7 @@ tr.playing .col-phonetic {
 }
 
 .meaning-item {
-  margin-right: 10px;
+  display: block;
 }
 
 .sentence-item {
@@ -1443,8 +1375,11 @@ tr.playing .col-phonetic {
   border: none;
   background: none;
   color: var(--dim);
-  font-size: 14px;
+  font-size: 16px;
   cursor: pointer;
+  /* 心形图标(17px)跟 +/✕ 文字按钮(24.5px)实际高度不一样，默认 baseline 对不齐；
+     改成 middle 让每个按钮各自的中心对齐到所在行的中线，而不是互相顶着基线站 */
+  vertical-align: middle;
 }
 
 tr:hover .op-btn {
@@ -1638,8 +1573,9 @@ tr:hover .op-btn {
   color: #f5c451;
 }
 
-/* ---------- 播放条（控制钮最左） ---------- */
+/* ---------- 播放条（控制钮最左，横跨侧栏+内容区整个宽度） ---------- */
 .player-bar {
+  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
@@ -1668,6 +1604,7 @@ tr:hover .op-btn {
 .mode-icon-btn img {
   width: 18px;
   height: 18px;
+  object-fit: contain;
   /* 黑色图标反色成浅灰，适配深色播放条 */
   filter: invert(62%);
   transition: filter 0.15s ease;

@@ -1,18 +1,19 @@
 {
   "name": "your-app",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "记单词",
   "main": "src/main/main.js",
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development electron .",
-    "build": "npm run build:render && npm run build:mac",
+    "build": "npm run build:render && npm run build:mac && npm run build:win && npm run clean:dist",
     "build:render": "cd src/render && npm run build",
-    "build:mac": "electron-builder --mac --arm64 --x64",
-    "build:mac:arm64": "electron-builder --mac --arm64",
-    "build:mac:x64": "electron-builder --mac --x64",
+    "build:mac": "electron-builder --mac --arm64 --x64 && npm run clean:dist",
+    "build:mac:arm64": "electron-builder --mac --arm64 && npm run clean:dist",
+    "build:mac:x64": "electron-builder --mac --x64 && npm run clean:dist",
     "pack:mac": "electron-builder --mac --dir",
-    "build:win": "electron-builder --win --x64"
+    "build:win": "electron-builder --win --x64 && npm run clean:dist",
+    "clean:dist": "find dist -mindepth 1 -maxdepth 1 ! -name '*.dmg' ! -name '*.exe' -exec rm -rf {} +"
   },
   "build": {
     "appId": "com.yourcompany.yourapp",
@@ -26,10 +27,11 @@
       "node_modules/**/*"
     ],
     "extraResources": [],
+    "publish": null,
     "mac": {
       "category": "public.app-category.productivity",
       "target": {
-        "target": "default",
+        "target": "dmg",
         "arch": [
           "arm64",
           "x64"

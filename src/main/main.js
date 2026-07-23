@@ -9,6 +9,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // 开发环境应用名默认是 "Electron"，统一显示为产品名
 app.name = '记单词'
 
+// 临时排查词幕例句问题：开发环境开一个远程调试端口，方便直接连上去看 console
+if (process.env.NODE_ENV === 'development') {
+  app.commandLine.appendSwitch('remote-debugging-port', '9333')
+}
+
 // 微信开放平台"网站应用"配置：AppID 不是密钥，可以放在客户端；
 // 打包前把 WECHAT_APP_ID 和 WECHAT_REDIRECT_URI 换成真实值
 // （WECHAT_REDIRECT_URI 要跟微信开放平台后台配置的"授权回调域"匹配的一个具体路径）
@@ -50,6 +55,50 @@ function setStoredToken(token) {
 
 function clearStoredToken() {
   setStoredToken(null)
+}
+
+const MIN_INTERVAL_MS = 3000
+const MAX_INTERVAL_MS = 15000
+const DEFAULT_INTERVAL_MS = 7000
+const DEFAULT_SUBTITLE_COLOR = '#46b9ea'
+const SUBTITLE_COLOR_RE = /^#[0-9a-fA-F]{6}$/
+
+function getSettingsFilePath() {
+  return join(app.getPath('userData'), 'settings.json')
+}
+
+function readSettings() {
+  const filePath = getSettingsFilePath()
+  if (!existsSync(filePath)) return {}
+  try {
+    return JSON.parse(readFileSync(filePath, 'utf-8'))
+  } catch {
+    return {}
+  }
+}
+
+// 设置项存在同一个 settings.json 里，写入时跟已有内容合并，不然新字段会把旧字段覆盖掉
+function writeSettings(patch) {
+  const merged = { ...readSettings(), ...patch }
+  writeFileSync(getSettingsFilePath(), JSON.stringify(merged), 'utf-8')
+}
+
+function getStoredIntervalMs() {
+  const ms = Number(readSettings().intervalMs)
+  return ms >= MIN_INTERVAL_MS && ms <= MAX_INTERVAL_MS ? ms : DEFAULT_INTERVAL_MS
+}
+
+function setStoredIntervalMs(ms) {
+  writeSettings({ intervalMs: ms })
+}
+
+function getStoredSubtitleColor() {
+  const color = readSettings().subtitleColor
+  return typeof color === 'string' && SUBTITLE_COLOR_RE.test(color) ? color : DEFAULT_SUBTITLE_COLOR
+}
+
+function setStoredSubtitleColor(color) {
+  writeSettings({ subtitleColor: color })
 }
 
 async function checkStoredAuth() {
@@ -164,6 +213,13 @@ function createMainWindow() {
     mainWindow = null
   })
 
+  // 无边框自定义标题栏，全屏后系统红绿灯不好点：Esc 兜底退出全屏
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.key === 'Escape' && mainWindow.isFullScreen()) {
+      mainWindow.setFullScreen(false)
+    }
+  })
+
   const isDev = process.env.NODE_ENV === 'development'
   if (isDev) {
     loadDevServerWithRetry(mainWindow, 'http://localhost:8081')
@@ -177,7 +233,7 @@ function createBarWindow() {
   if (barWindow && !barWindow.isDestroyed()) return
   barWindow = new BrowserWindow({
     width: 400,
-    height: 100,
+    height: 140, // 留够单词+释义+一行例句的高度，不完全依赖 resize（悬浮在全屏应用上方时 resize 不一定可靠）
     title: '记单词',
     webPreferences: {
       nodeIntegration: false,
@@ -185,7 +241,8 @@ function createBarWindow() {
       preload: join(__dirname, '../preload/preload.cjs')
     },
     transparent: true,
-    frame: false
+    frame: false,
+    fullscreenable: false // 主窗口全屏时 macOS 有时会把新开的词幕条也拉伸进那个全屏 Space，禁掉全屏能力兜底
   })
   // 悬浮于所有虚拟桌面和全屏应用之上
   barWindow.setAlwaysOnTop(true, 'screen-saver')
@@ -209,9 +266,10 @@ function createBarWindow() {
 // 大词库分页播放：一次只持有一页（100 词），播完当前页自动拉下一页，
 // 播完最后一页回到第一页；拉取失败继续循环当前页，不卡轮播。
 const playback = {
-  libraryId: null, // 数字词库ID 或 'all'（全部单词）
+  kind: 'word', // word=单词轮播（有道TTS+例句） expression=日常用语轮播（预生成音频）
+  libraryId: null, // 数字词库ID 或 'all'（全部单词）或 'expressions'（日常用语）
   libraryName: '',
-  words: [], // 当前页的单词
+  words: [], // 当前页的条目（单词或日常用语）
   index: -1,
   page: 1,
   pageSize: 100,
@@ -222,12 +280,18 @@ const playback = {
   playing: false,
   mode: 'shuffle', // order=列表循环 single=单词循环（同一个词重复播） shuffle=随机
   audioEnabled: true, // 切词时播有道发音（美音）
+  sentenceEnabled: true, // 单词发音结束后是否接播例句（多义词按顺序逐条播）
+  intervalMs: DEFAULT_INTERVAL_MS, // 轮播间隔，3000~15000ms，应用启动时从设置文件加载
+  subtitleColor: DEFAULT_SUBTITLE_COLOR, // 词幕文字颜色，应用启动时从设置文件加载
+  audioDone: true, // 当前条目的发音(+接播例句)是否已播完；定时器到点时还没播完就先等着
+  pendingAdvance: false, // 定时器已到点但发音没播完，记下来，播完后立刻补切
   timer: null,
   barVisible: false
 }
 
 function playbackState() {
   return {
+    kind: playback.kind,
     libraryId: playback.libraryId,
     libraryName: playback.libraryName,
     index: playback.index,
@@ -240,20 +304,48 @@ function playbackState() {
     playing: playback.playing,
     mode: playback.mode,
     audioEnabled: playback.audioEnabled,
+    sentenceEnabled: playback.sentenceEnabled,
+    intervalMs: playback.intervalMs,
+    subtitleColor: playback.subtitleColor,
     barVisible: playback.barVisible,
     currentWord: playback.words[playback.index] || null
   }
 }
 
 // 只在"单词切换"时触发发音（开关/模式变化不补播）；
-// 定向发给一个存活窗口，双窗口同开也只出一次声。
-// 音频成功/失败与轮播节奏完全解耦：失败由渲染端静默跳过，这里不等回执。
+// 定向发给一个存活窗口，双窗口同开也只出一次声——优先悬浮词幕条：
+// 例句文本现在只在词幕条里展示，词幕条开着时理应是那个"正在听"的窗口。
+// 播完（或失败）由渲染端通过 playback:audio-ended 回执，定时器据此判断能不能切下一条。
 function triggerAudio() {
-  if (!playback.audioEnabled) return
-  const word = playback.words[playback.index]
-  if (!word) return
-  const target = [mainWindow, barWindow].find((w) => w && !w.isDestroyed())
-  if (target) target.webContents.send('playback:play-audio', word.word)
+  playback.pendingAdvance = false // 新条目开播，清掉上一条可能留下的"到点未播完"标记
+  const item = playback.words[playback.index]
+  if (!item) {
+    playback.audioDone = true
+    return
+  }
+  // 单词模式下"发音"和"例句"是两个独立开关：发音关了例句也该照常接播，
+  // 所以这里不能只看 audioEnabled——两个开关都关才真的没什么可播的。
+  const hasAnythingToPlay =
+    playback.kind === 'expression' ? playback.audioEnabled : playback.audioEnabled || playback.sentenceEnabled
+  if (!hasAnythingToPlay) {
+    playback.audioDone = true
+    return
+  }
+  const target = [barWindow, mainWindow].find((w) => w && !w.isDestroyed())
+  if (!target) {
+    playback.audioDone = true
+    return
+  }
+  playback.audioDone = false
+  if (playback.kind === 'expression') {
+    target.webContents.send('playback:play-audio', { kind: 'expression', audioUrl: item.audio_url })
+  } else {
+    target.webContents.send('playback:play-audio', {
+      kind: 'word',
+      text: item.word,
+      skipWordAudio: !playback.audioEnabled
+    })
+  }
 }
 
 function broadcastPlayback() {
@@ -304,9 +396,11 @@ async function loadNextPage() {
     const totalPages = Math.max(1, Math.ceil(playback.total / playback.pageSize))
     const nextPage = playback.page >= totalPages ? 1 : playback.page + 1
     const base =
-      playback.libraryId === 'all'
-        ? `${API_BASE_URL}/words/list`
-        : `${API_BASE_URL}/libraries/${playback.libraryId}/words`
+      playback.kind === 'expression'
+        ? `${API_BASE_URL}/daily-expressions/list`
+        : playback.libraryId === 'all'
+          ? `${API_BASE_URL}/words/list`
+          : `${API_BASE_URL}/libraries/${playback.libraryId}/words`
     const token = getStoredToken()
     const res = await fetch(`${base}?page=${nextPage}&page_size=${playback.pageSize}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
@@ -331,13 +425,24 @@ async function loadNextPage() {
   }
 }
 
-// 定时轮播一拍：单词循环模式重复读当前词，其余模式切下一个
+// 定时轮播一拍：单词循环模式重复读当前词，其余模式切下一个。
+// 到点了但上一条的发音(+例句)还没播完，就先记下来，等播完的回执一到马上补切，不掐断内容。
 function playbackTick() {
-  if (playback.mode === 'single') {
-    if (playback.words[playback.index]) triggerAudio()
+  if (!playback.audioDone) {
+    playback.pendingAdvance = true
     return
   }
-  playbackStep(1)
+  advancePlayback()
+}
+
+function advancePlayback() {
+  if (playback.mode === 'single') {
+    if (playback.words[playback.index]) triggerAudio()
+  } else {
+    playbackStep(1)
+  }
+  // 真正切换的时刻可能比定时器原计划晚（等了发音），从这一刻起重新给一个完整间隔
+  restartPlaybackTimer()
 }
 
 // 手动切词也走这里重启定时器，保证切完有完整的一个间隔周期
@@ -345,7 +450,7 @@ function restartPlaybackTimer() {
   clearInterval(playback.timer)
   playback.timer = null
   if (playback.playing && playback.words.length > 0) {
-    playback.timer = setInterval(() => playbackTick(), 7000)
+    playback.timer = setInterval(() => playbackTick(), playback.intervalMs)
   }
 }
 
@@ -443,7 +548,9 @@ function startVueDevServer() {
     vueDevServer = spawn('pnpm', ['run', 'serve'], {
       cwd: vueProjectPath,
       shell: true,
-      stdio: 'pipe'
+      stdio: 'pipe',
+      detached: true // 独立进程组：shell:true 会派生 pnpm→vue-cli-service→webpack-dev-server 这条链，
+      // 只 kill 最外层 shell 杀不干净，子孙进程会变成孤儿常驻，一直占着端口读到的还是旧代码
     });
     
     vueDevServer.stdout.on('data', (data) => {
@@ -728,8 +835,9 @@ ipcMain.on('window-move-by', (event, dx, dy) => {
 
 // ---------- 播放控制 ----------
 ipcMain.handle('playback:start', (event, payload) => {
-  const { libraryId, libraryName, words, startIndex, page, pageSize, total, pageable } =
+  const { kind, libraryId, libraryName, words, startIndex, page, pageSize, total, pageable } =
     payload || {}
+  playback.kind = kind === 'expression' ? 'expression' : 'word'
   playback.libraryId = libraryId ?? null
   playback.libraryName = libraryName || ''
   playback.words = Array.isArray(words) ? words : []
@@ -773,6 +881,32 @@ ipcMain.on('playback:set-audio', (event, enabled) => {
   playback.audioEnabled = !!enabled
   broadcastPlayback()
 })
+ipcMain.on('playback:set-sentence', (event, enabled) => {
+  playback.sentenceEnabled = !!enabled
+  broadcastPlayback()
+})
+ipcMain.on('playback:set-interval', (event, ms) => {
+  const clamped = Math.min(MAX_INTERVAL_MS, Math.max(MIN_INTERVAL_MS, Number(ms) || DEFAULT_INTERVAL_MS))
+  playback.intervalMs = clamped
+  setStoredIntervalMs(clamped)
+  restartPlaybackTimer()
+  broadcastPlayback()
+})
+ipcMain.on('playback:set-subtitle-color', (event, color) => {
+  if (typeof color !== 'string' || !SUBTITLE_COLOR_RE.test(color)) return
+  playback.subtitleColor = color
+  setStoredSubtitleColor(color)
+  broadcastPlayback()
+})
+// 渲染端播完当前条目的发音(+接播例句)后回执；定时器如果已经等在这儿了，立刻补切
+ipcMain.on('playback:audio-ended', () => {
+  playback.audioDone = true
+  if (playback.pendingAdvance) {
+    playback.pendingAdvance = false
+    advancePlayback()
+  }
+})
+
 ipcMain.handle('playback:get-state', () => playbackState())
 
 // 划词弹窗收藏：主进程代发（弹窗是 data: 页面，直连后端会被 CORS 拦），
@@ -815,6 +949,16 @@ ipcMain.handle('bar:toggle', () => {
   return playback.barVisible
 })
 
+// 悬浮词幕条按内容自适应高度（比如接播例句时文字变多）：宽度固定，只调高度
+const BAR_MIN_HEIGHT = 140
+const BAR_MAX_HEIGHT = 480
+ipcMain.on('bar:resize', (event, height) => {
+  if (!barWindow || barWindow.isDestroyed()) return
+  const clamped = Math.min(BAR_MAX_HEIGHT, Math.max(BAR_MIN_HEIGHT, Math.round(Number(height) || BAR_MIN_HEIGHT)))
+  const [width] = barWindow.getSize()
+  barWindow.setSize(width, clamped)
+})
+
 ipcMain.handle('auth:get-token', () => getStoredToken())
 ipcMain.handle('auth:set-token', (event, token) => {
   setStoredToken(token)
@@ -846,6 +990,8 @@ ipcMain.handle('auth:session-expired', () => {
 
 app.whenReady().then(async () => {
   const isDev = process.env.NODE_ENV === 'development'
+  playback.intervalMs = getStoredIntervalMs()
+  playback.subtitleColor = getStoredSubtitleColor()
 
   // 开发环境 Dock 图标（打包版由 resources/icon.icns 提供）
   const dockIconPath = join(__dirname, '../../resources/icon.png')
@@ -898,14 +1044,17 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll()
 })
 
+// 单窗口小工具，不跟 macOS「关窗不退出、留在 Dock 里」的多文档 app 惯例，关窗就彻底退出
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
+  app.quit()
 })
 
 app.on('before-quit', () => {
   if (vueDevServer) {
-    vueDevServer.kill('SIGTERM')
+    try {
+      process.kill(-vueDevServer.pid, 'SIGTERM') // 负号 PID＝杀掉整个进程组，而不是只杀最外层 shell
+    } catch {
+      vueDevServer.kill('SIGTERM') // 兜底：万一不支持进程组 kill（比如 Windows）
+    }
   }
 })

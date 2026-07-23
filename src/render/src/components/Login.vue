@@ -1,25 +1,51 @@
 <template>
   <div class="login">
-    <h1 class="title">记单词</h1>
+    <h1 class="title">
+      记单词
+    </h1>
 
-    <form class="account-form" @submit.prevent="submitLogin">
-      <input v-model="username" class="input" placeholder="用户名" autocomplete="username" />
+    <form
+      class="account-form"
+      @submit.prevent="submitLogin"
+    >
+      <input
+        v-model="username"
+        class="input"
+        placeholder="用户名"
+        autocomplete="username"
+      >
       <input
         v-model="password"
         class="input"
         type="password"
         placeholder="密码"
         autocomplete="current-password"
-      />
+      >
       <div class="actions">
-        <button class="btn" type="submit" :disabled="loading">登录</button>
-        <button class="btn secondary" type="button" :disabled="loading" @click="submitRegister">
+        <button
+          class="btn"
+          type="submit"
+          :disabled="loading"
+        >
+          登录
+        </button>
+        <button
+          class="btn secondary"
+          type="button"
+          :disabled="loading"
+          @click="submitRegister"
+        >
           注册新账号
         </button>
       </div>
     </form>
 
-    <p v-if="errorMsg" class="error">{{ errorMsg }}</p>
+    <p
+      v-if="errorMsg"
+      class="error"
+    >
+      {{ errorMsg }}
+    </p>
   </div>
 </template>
 
